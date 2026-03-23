@@ -1,3 +1,5 @@
+require "net/http"
+
 module OpenaiHelper
   def client
     validate_api_credentials
@@ -23,59 +25,71 @@ module OpenaiHelper
   end
 
   def ai_generate_completion(transcription)
-    begin
-      response =
-        client.chat(
-          parameters: {
-            model: "gpt-3.5-turbo-1106",
-            messages: [
-              {
-                "role": "system",
-                "content": system_prompt(transcription)
-              },
-              {
-                "role": "user",
-                "content": transcription.transcription_text
-              }
-            ],
-            tools: [
-              {
-                type: "function",
-                function: {
-                  name: "fill_form",
-                  description: "Fill out a form with the data from the user's message",
-                  parameters: {
-                    type: :object,
-                    properties: { **create_types_form_form_fields(transcription.form_fields, transcription.context) },
-                    required: []
-                  }
-                }
-              }
-            ]
-          },
-        )
-    rescue Faraday::Error => e
-      handle_openai_error(e)
+    validate_claude_credentials
+
+    # Claude requires property keys matching ^[a-zA-Z0-9_.-]{1,64}$
+    # Build sanitized_key → original_title mapping so we can restore original keys from the response
+    key_map = {}
+    transcription.form_fields.each do |f|
+      key_map[sanitize_field_key(f.title)] = f.title
     end
 
-    message = response.dig("choices", 0, "message")
-    usage = response.dig("usage")
+    properties = claude_properties(transcription.form_fields, transcription.context)
 
-    if message["role"] == "assistant" && message["tool_calls"]
-      message["tool_calls"].each do |tool_call|
-        tool_name = tool_call.dig("function", "name")
-        args =
-          JSON.parse(
-            tool_call.dig("function", "arguments"),
-            symbolize_names: true
-          )
-        case tool_name
-        when "fill_form"
-          transcription.update!(ai_response: args, status: :completion_generated, **usage_tokens(transcription, usage))
-        else
-          transcription.update!(status: :failed, **usage_tokens(transcription, usage))
-        end
-      end
+    uri = URI("https://api.anthropic.com/v1/messages")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+
+    request = Net::HTTP::Post.new(uri)
+    request["x-api-key"] = ENV["ANTHROPIC_API_KEY"]
+    request["anthropic-version"] = "2023-06-01"
+    request["content-type"] = "application/json"
+    request.body = {
+      model: "claude-opus-4-6",
+      max_tokens: 1024,
+      system: system_prompt(transcription),
+      messages: [
+        { role: "user", content: transcription.transcription_text }
+      ],
+      tools: [
+        {
+          name: "fill_form",
+          description: "Fill out a form with the data from the user's message",
+          input_schema: {
+            type: "object",
+            properties: properties,
+            required: []
+          }
+        }
+      ],
+      tool_choice: { type: "auto" }
+    }.to_json
+
+    response = http.request(request)
+    body = JSON.parse(response.body)
+
+    unless response.code.to_i == 200
+      raise GenericException.new(
+        message: "Claude API error: #{body.dig("error", "message") || response.message}",
+        code: :failed_dependency
+      )
+    end
+
+    usage = body["usage"]
+    tool_use = body["content"]&.find { |c| c["type"] == "tool_use" }
+
+    if tool_use && tool_use["name"] == "fill_form"
+      # Restore original field titles from sanitized keys
+      args = tool_use["input"].transform_keys { |k| (key_map[k] || k).to_sym }
+      transcription.update!(
+        ai_response: args,
+        status: :completion_generated,
+        prompt_tokens: (usage["input_tokens"] || 0) + transcription.prompt_tokens,
+        completion_tokens: (usage["output_tokens"] || 0) + transcription.completion_tokens,
+        total_tokens: ((usage["input_tokens"] || 0) + (usage["output_tokens"] || 0)) + transcription.total_tokens
+      )
+    else
+      transcription.update!(status: :failed)
     end
   end
 
@@ -84,14 +98,6 @@ module OpenaiHelper
     context_info = context[form_field.title] if context.present?
 
     [ base_description, context_info ].compact.join("; Context: ")
-  end
-
-  def usage_tokens(transcription, usage)
-    {
-      prompt_tokens: usage["prompt_tokens"] + transcription.prompt_tokens,
-      completion_tokens: usage["completion_tokens"] + transcription.completion_tokens,
-      total_tokens: usage["total_tokens"] + transcription.total_tokens
-    }
   end
 
   def create_types_form_form_fields(form_fields, context)
@@ -106,10 +112,34 @@ module OpenaiHelper
 
   private
 
+  def sanitize_field_key(title)
+    title.to_s.gsub(/[^a-zA-Z0-9_.\-]/, "_").slice(0, 64)
+  end
+
+  # Like create_types_form_form_fields but uses sanitized keys for Claude
+  def claude_properties(form_fields, context)
+    fields = {}
+    form_fields.each do |form_field|
+      fields[sanitize_field_key(form_field.title)] = form_field.to_json_schema_for_ai.merge(
+        description: smart_description(form_field, context)
+      )
+    end
+    fields
+  end
+
   def validate_api_credentials
     unless ENV["OPENAI_ACCESS_TOKEN"].present?
       raise GenericException.new(
         message: "OpenAI API key is missing. Please set it in the environment variable OPENAI_ACCESS_TOKEN.",
+        code: :failed_dependency
+      )
+    end
+  end
+
+  def validate_claude_credentials
+    unless ENV["ANTHROPIC_API_KEY"].present?
+      raise GenericException.new(
+        message: "Anthropic API key is missing. Please set ANTHROPIC_API_KEY.",
         code: :failed_dependency
       )
     end

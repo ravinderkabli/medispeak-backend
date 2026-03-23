@@ -58,8 +58,12 @@ class Api::V1::TranscriptionsController < Api::BaseController
 
   def create_transcription(page)
     transcription = page.transcriptions.create!(transcription_params.merge(user: current_user))
-    text = ai_transcribe(params[:transcription][:audio_file])
-    transcription.update!(transcription_text: text, status: :transcribed)
+    if transcription.transcription_text.present?
+      transcription.update!(status: :transcribed)
+    else
+      text = ai_transcribe(params[:transcription][:audio_file])
+      transcription.update!(transcription_text: text, status: :transcribed)
+    end
     transcription
   rescue StandardError => e
     handle_audio_upload_error(e)
@@ -74,7 +78,7 @@ class Api::V1::TranscriptionsController < Api::BaseController
   end
 
   def transcription_params
-    params.require(:transcription).permit(:audio_file, :duration, :context)
+    params.require(:transcription).permit(:audio_file, :duration, :context, :transcription_text)
   end
 
   def format_transcription(transcription)
