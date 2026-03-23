@@ -21,7 +21,7 @@ module OpenaiHelper
   def system_prompt(transcription)
     return transcription.page.prompt if transcription.page.prompt.present?
 
-    "You are an AI assistant filling the form for a user. Make sure that you do not populate the form with any data that the user did not provide. Ensure all data shared by users are correctly split into function arguments."
+    "You are an AI assistant filling a medical form for a user. The transcript may be in English, Hindi, Kannada, or a mix of Hindi and English (Hinglish). Understand the transcript regardless of language and extract the relevant data. Do not populate any field with data the user did not provide. Ensure all data shared by the user is correctly split into the appropriate form fields."
   end
 
   def ai_generate_completion(transcription)
