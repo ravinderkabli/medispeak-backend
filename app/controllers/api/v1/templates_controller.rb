@@ -11,9 +11,11 @@ class Api::V1::TemplatesController < Api::BaseController
 
   # GET /api/v1/template/find_by_domain/
   def find_by_domain
-    origin = find_host(request)
+    origin = params[:domain].presence || find_host(request)
     domain = Domain.find_by(fqdn: origin)
     @template = Template.active.find_by(id: domain&.template_id)
+
+    @template ||= Template.active.first
 
     if @template
       render "templates/show"

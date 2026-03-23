@@ -107,13 +107,9 @@ module OpenaiHelper
   private
 
   def validate_api_credentials
-    missing_keys = []
-    missing_keys << "API key" unless ENV["OPENAI_ACCESS_TOKEN"].present?
-    missing_keys << "Organization ID" unless ENV["OPENAI_ORGANIZATION_ID"].present?
-
-    if missing_keys.any?
+    unless ENV["OPENAI_ACCESS_TOKEN"].present?
       raise GenericException.new(
-        message: "OpenAI #{missing_keys.join(' and ')} is missing. Please set it in the environment variable OPENAI_ACCESS_TOKEN and OPENAI_ORGANIZATION_ID.",
+        message: "OpenAI API key is missing. Please set it in the environment variable OPENAI_ACCESS_TOKEN.",
         code: :failed_dependency
       )
     end
