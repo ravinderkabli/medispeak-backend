@@ -17,7 +17,7 @@ gem "stimulus-rails"
 # Build JSON APIs with ease [https://github.com/rails/jbuilder]
 gem "jbuilder"
 # Load environment variables from .env file
-gem "dotenv-rails", "~> 3.1", groups: %i[development test]
+gem "dotenv-rails", "~> 3.2", groups: %i[development test]
 # Inline SVG
 gem "inline_svg", "~> 1.10.0"
 # Delayed job
