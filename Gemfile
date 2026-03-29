@@ -25,7 +25,7 @@ gem "delayed_job_active_record", "~> 4.1"
 # Administrate for admin panel
 gem "administrate", github: "thoughtbot/administrate", branch: "main"
 # Open AI ruby
-gem "ruby-openai", "~> 6.2"
+gem "ruby-openai", "~> 8.3"
 # Pagy for pagination
 gem "pagy", "~> 6.0"
 # Pundit for authorization
